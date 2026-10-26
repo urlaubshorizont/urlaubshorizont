@@ -1,0 +1,79 @@
+# Website-Check für urlaubshorizont.de
+#
+# Wöchentlich (Montag früh) und per Hand: prüft die LIVE-Website.
+#   Probleme -> GitHub-Issue „Website-Check: Probleme gefunden“ (du bekommst eine E-Mail).
+#   Wieder alles gut -> das Issue wird automatisch geschlossen.
+# Bei jedem Push: prüft, ob die HTML-Dateien zum Stand von content.py passen,
+#   und testet die gebaute Website vor der Veröffentlichung.
+name: Website-Check
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"   # montags 05:17 UTC (06:17 / 07:17 deutsche Zeit)
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: website-check-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TITLE: "Website-Check: Probleme gefunden"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Ist der Build aktuell?
+        if: github.event_name == 'push'
+        run: |
+          python _src/build.py
+          if ! git diff --quiet; then
+            echo "::error::Die HTML-Dateien passen nicht zu content.py. Lokal 'python _src/build.py' ausführen und die Änderungen committen."
+            git diff --stat
+            exit 1
+          fi
+
+      - name: Gebaute Website prüfen (vor der Veröffentlichung)
+        if: github.event_name == 'push'
+        run: python _src/check_site.py --dir . --report report.md
+
+      - name: Live-Website prüfen
+        id: live
+        if: github.event_name != 'push'
+        continue-on-error: true
+        run: python _src/check_site.py --report report.md
+
+      - name: Ergebnis als Issue melden
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTCOME: ${{ steps.live.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          printf '\n[Protokoll dieses Laufs](%s)\n' "$RUN_URL" >> report.md
+          num=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -n "$num" ]; then
+              gh issue close "$num" --comment "Alles wieder in Ordnung. $(head -1 report.md)"
+            fi
+          elif [ -n "$num" ]; then
+            gh issue comment "$num" --body-file report.md
+          else
+            gh issue create --title "$TITLE" --body-file report.md
+          fi
+
+      - name: Lauf als fehlgeschlagen markieren
+        if: github.event_name != 'push' && steps.live.outcome != 'success'
+        run: exit 1
