@@ -7,3 +7,6 @@ _agent/input/
 # privat, nicht veröffentlichen
 CLAUDE.md
 _agent/
+
+# lokale Einstellungen von Claude Code
+.claude/

@@ -5,13 +5,14 @@ Ausgabe: alle Seiten im Projektordner (eine Ebene über _src/).
 Der Ordner _src/ wird von GitHub Pages nicht veröffentlicht.
 """
 import html
+import json
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-from content import SITE, MONTHS, DESTINATIONS  # noqa: E402
+from content import SITE, MONTHS, DESTINATIONS, ARTICLES  # noqa: E402
 
 E = html.escape
 CSS = open(os.path.join(HERE, "style.css"), encoding="utf-8").read()
@@ -85,8 +86,9 @@ def nav_link(href, label, active):
     return f'<a href="{href}"{cur}>{label}</a>'
 
 
-def page(path, title, desc, body, active="", og_image=""):
+def page(path, title, desc, body, active="", og_image="", index=True):
     depth = path.count("/")
+    robots = "" if index else '<meta name="robots" content="noindex, follow">'
     root = "../" * depth
     canonical = SITE["url"] + "/" + (path[:-len("index.html")] if path.endswith("index.html") else path)
     verify = (f'<meta name="p:domain_verify" content="{E(SITE["pinterest_verify"])}">'
@@ -95,6 +97,7 @@ def page(path, title, desc, body, active="", og_image=""):
     pin = (f'<a href="{E(SITE["pinterest"])}" rel="noopener" target="_blank">Pinterest</a>'
            if SITE["pinterest"] else "")
     nav = (nav_link(f"{root}#reiseziele", "Reiseziele", active == "home")
+           + nav_link(f"{root}ratgeber/", "Ratgeber", active == "ratgeber")
            + nav_link(f"{root}reisekalender/", "Reisekalender", active == "kalender")
            + nav_link(f"{root}ueber-uns/", "Über uns", active == "about"))
     return f"""<!doctype html>
@@ -104,6 +107,7 @@ def page(path, title, desc, body, active="", og_image=""):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{E(title)}</title>
 <meta name="description" content="{E(desc)}">
+{robots}
 <link rel="canonical" href="{canonical}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{SITE['name']}">
@@ -114,6 +118,10 @@ def page(path, title, desc, body, active="", og_image=""):
 {og_tag}
 {verify}
 <link rel="icon" href="{root}favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="{root}apple-touch-icon.png">
+<link rel="preload" href="/fonts/atkinson-hyperlegible-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/brygada-1918-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<meta name="theme-color" content="#0F2D3F">
 <style>
 {CSS}
 </style>
@@ -121,7 +129,7 @@ def page(path, title, desc, body, active="", og_image=""):
 <body>
 <a class="skip" href="#inhalt">Zum Inhalt springen</a>
 <header class="site">
-  <a class="brand" href="{root}"><span class="brand-mark" aria-hidden="true"></span>{SITE['name']}</a>
+  <a class="brand" href="{root}"><img src="{root}logo/zeichen.svg" alt="" width="38" height="38">{SITE['name']}</a>
   <nav aria-label="Hauptnavigation">{nav}</nav>
 </header>
 <main id="inhalt">
@@ -137,6 +145,7 @@ def page(path, title, desc, body, active="", og_image=""):
       {''.join(f'<a href="{root}reiseziele/{d["slug"]}/">{d["name"]}</a>' for d in DESTINATIONS)}
     </nav>
     <nav aria-label="Rechtliches">
+      <a href="{root}ratgeber/">Ratgeber</a>
       <a href="{root}reisekalender/">Reisekalender</a>
       <a href="{root}ueber-uns/">Über uns</a>
       <a href="{root}impressum/">Impressum</a>
@@ -166,31 +175,304 @@ def hotel_link(h):
     return booking_url(*h["booking"])
 
 
-def hotel_card(d, h):
+def booking_button(h, label="Preise und Verfügbarkeit bei Booking.com"):
+    return (f'<a class="btn" href="{E(hotel_link(h))}" rel="sponsored nofollow noopener" '
+            f'target="_blank">{label}</a>')
+
+
+def hotel_media(d, h, cls="hotel-img"):
+    if h.get("image"):
+        return (f'<img class="{cls}" src="{E(h["image"])}" alt="{E(h["name"])}" '
+                f'loading="lazy" width="640" height="400">')
+    return (f'<div class="hotel-band" style="--sky:{d["sky"]};--land:{d["land"]}" aria-hidden="true">'
+            f'<span></span></div>')
+
+
+def hotel_card(d, h, prefix):
+    """Kompakte Karte, verlinkt auf die Hotelseite. prefix = Weg von der aktuellen
+    Seite zum Reiseziel-Ordner (z. B. "" auf der Reiseziel-Seite, "../" auf einer Hotelseite)."""
+    tags = "".join(f"<li>{E(t)}</li>" for t in h["tags"])
+    return f"""
+    <li class="hotel compact" id="hotel-{h['id']}">
+      <a class="hotel-link" href="{prefix}{h['id']}/">
+        {hotel_media(d, h)}
+        <div class="hotel-body">
+          <p class="where">{E(h['place'])}</p>
+          <h3>{E(h['name'])}</h3>
+          <ul class="tags">{tags}</ul>
+          <p class="ideal">Ideal für {E(h.get('ideal', ''))}</p>
+          <span class="more">Zum Hotel <span aria-hidden="true">→</span></span>
+        </div>
+      </a>
+    </li>"""
+
+
+# ---------------------------------------------------------------- Hotel-Register
+# Jede Hotel-ID, die je veröffentlicht wurde, steht in _src/hotel_ids.txt ("<reiseziel>/<id>").
+# Verschwindet ein Hotel aus content.py, bleibt seine Adresse als Weiterleitung aufs
+# Reiseziel bestehen – Pins zeigen so nie ins Leere.
+REGISTRY = os.path.join(HERE, "hotel_ids.txt")
+
+
+def update_registry():
+    known = set()
+    if os.path.exists(REGISTRY):
+        with open(REGISTRY, encoding="utf-8-sig") as f:
+            known = {ln.strip() for ln in f if "/" in ln and not ln.lstrip().startswith("#")}
+    current = {f"{d['slug']}/{h['id']}" for d in DESTINATIONS for h in d["hotels"]}
+    ids = [h["id"] for d in DESTINATIONS for h in d["hotels"]]
+    dupes = {i for i in ids if ids.count(i) > 1}
+    if dupes:
+        sys.exit(f"Fehler: Hotel-ID mehrfach vergeben: {', '.join(sorted(dupes))}")
+    with open(REGISTRY, "w", encoding="utf-8", newline="\n") as f:
+        f.write("# Alle je veröffentlichten Hotel-Adressen. Nicht von Hand löschen.\n")
+        f.write("".join(f"{x}\n" for x in sorted(known | current)))
+    return sorted(known - current)
+
+
+def build_removed(entry):
+    slug, hid = entry.split("/", 1)
+    dest = next((d for d in DESTINATIONS if d["slug"] == slug), None)
+    target = f"{SITE['url']}/reiseziele/{slug}/" if dest else SITE["url"] + "/"
+    write(f"reiseziele/{slug}/{hid}/index.html", f"""<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Weiterleitung | {SITE['name']}</title>
+<meta name="robots" content="noindex">
+<link rel="canonical" href="{target}">
+<meta http-equiv="refresh" content="0; url={target}">
+</head>
+<body>
+<p>Dieses Hotel stellen wir nicht mehr vor. Weiter zu <a href="{target}">{E(dest['name']) if dest else SITE['name']}</a>.</p>
+</body>
+</html>
+""")
+
+
+def build_hotel(d, h):
     tags = "".join(f"<li>{E(t)}</li>" for t in h["tags"])
     hl = "".join(f"<li>{E(x)}</li>" for x in h.get("highlights", []))
-    if h.get("image"):
-        media = (f'<img class="hotel-img" src="{E(h["image"])}" alt="{E(h["name"])}" '
-                 f'loading="lazy" width="640" height="400">')
-    else:
-        media = (f'<div class="hotel-band" style="--sky:{d["sky"]};--land:{d["land"]}" aria-hidden="true">'
-                 f'<span></span></div>')
-    return f"""
-    <li class="hotel" id="hotel-{h['id']}">
-      {media}
-      <div class="hotel-body">
+    others = "".join(hotel_card(d, o, "../") for o in d["hotels"] if o["id"] != h["id"])
+    image = (f'<img class="hotel-photo" src="{E(h["image"])}" alt="{E(h["name"])}" width="1280" height="800">'
+             if h.get("image") else "")
+    og = h.get("image") or (f"{SITE['url']}/bilder/{photo(d['slug'])}" if photo(d["slug"]) else "")
+    path = f"reiseziele/{d['slug']}/{h['id']}/index.html"
+    # Optional in content.py: "fits_if" / "not_if" = Listen mit kurzen Sätzen
+    fit = ""
+    if h.get("fits_if") or h.get("not_if"):
+        yes = "".join(f"<li>{E(x)}</li>" for x in h.get("fits_if", []))
+        no = "".join(f"<li>{E(x)}</li>" for x in h.get("not_if", []))
+        fit = (f'<div class="fit">'
+               + (f'<div><h3>Passt zu dir, wenn …</h3><ul>{yes}</ul></div>' if yes else "")
+               + (f'<div class="no"><h3>Eher nicht, wenn …</h3><ul>{no}</ul></div>' if no else "")
+               + "</div>")
+    arts = [a for a in ARTICLES if any(i == h["id"] for i, _ in a["hotels"])]
+    mentioned = ""
+    if arts:
+        mentioned = ("<h2>Im Ratgeber</h2><ul class=\"art-links\">"
+                     + "".join(f'<li><a href="../../../ratgeber/{a["slug"]}/">{E(a["title"])}</a></li>' for a in arts)
+                     + "</ul>")
+    body = f"""
+<section class="dest-hero hotel-hero{tile_class(d)}" style="{tile_style(d, '../../../')}">
+  <p class="crumb"><a href="../../../">Start</a> <span aria-hidden="true">/</span> <a href="../">{d['name']}</a></p>
+  <h1>{E(h['name'])}</h1>
+  <p class="dest-sub">{E(h['place'])}</p>
+</section>
+
+<div class="cta-bar">
+  {booking_button(h)}
+  <p class="note">Aktuelle Preise und freie Zimmer siehst du direkt bei Booking.com.</p>
+</div>
+
+<div class="dest-body">
+  <article class="prose">
+    {image}
+    <ul class="tags">{tags}</ul>
+    <p>{E(h['text'])}</p>
+    <h2>Das zeichnet das Hotel aus</h2>
+    <ul class="highlights">{hl}</ul>
+    {fit}
+    {mentioned}
+    <p class="note">Links zu Buchungsportalen können Affiliate-Links sein. Für dich ändert sich am Preis nichts.</p>
+  </article>
+  <aside class="facts" aria-label="Auf einen Blick">
+    <h2>Auf einen Blick</h2>
+    <h3>Lage</h3>
+    <p>{E(h['place'])}</p>
+    <h3>Ideal für</h3>
+    <p>{E(h.get('ideal', ''))}</p>
+    <h3>Anreise</h3>
+    <p>{E(h.get('arrival', ''))}</p>
+    <h3>Beste Reisezeit</h3>
+    {months_bar(d['best'])}
+    <h3>Flugzeit ab Deutschland</h3>
+    <p class="mono">{d['flight']}</p>
+    {booking_button(h, "Zum Hotel bei Booking.com")}
+  </aside>
+</div>
+
+<section class="hotels" aria-labelledby="h-more">
+  <div class="section-head">
+    <h2 id="h-more">Weitere Hotels: {d['name']}</h2>
+    <a class="more" href="../">Alles über {d['name']} →</a>
+  </div>
+  <ul class="hotel-list">{others}
+  </ul>
+</section>
+"""
+    first = h["text"].split(". ")[0].rstrip(".") + "."
+    # Hotelseiten sind für Google ausgeblendet (dünner Inhalt), bis ein Hotel "index": True bekommt.
+    write(path, page(path, f"{h['name']}, {h['place']} | {SITE['name']}",
+                     f"{h['name']} ({h['place']}): {first}", body, og_image=og,
+                     index=bool(h.get("index"))))
+
+
+# ---------------------------------------------------------------- Ratgeber-Artikel
+HOTELS = {h["id"]: (d, h) for d in DESTINATIONS for h in d["hotels"]}
+
+
+def check_articles():
+    slugs = [a["slug"] for a in ARTICLES]
+    if len(slugs) != len(set(slugs)):
+        sys.exit("Fehler: Artikel-Slug mehrfach vergeben.")
+    for a in ARTICLES:
+        for hid, _ in a["hotels"]:
+            if hid not in HOTELS:
+                sys.exit(f"Fehler: Artikel {a['slug']} nennt unbekanntes Hotel {hid}.")
+
+
+def article_style(a, prefix):
+    d = next((x for x in DESTINATIONS if x["slug"] == a.get("dest")), DESTINATIONS[0])
+    return d, tile_style(d, prefix), tile_class(d)
+
+
+def build_article(a):
+    d0, style, cls = article_style(a, "../../")
+    intro = "".join(f"<p>{p}</p>" for p in a["intro"])
+    items = ""
+    for n, (hid, note) in enumerate(a["hotels"], 1):
+        d, h = HOTELS[hid]
+        tags = "".join(f"<li>{E(t)}</li>" for t in h["tags"])
+        items += f"""
+    <li class="art-hotel" id="hotel-{hid}">
+      <div class="art-media">{hotel_media(d, h)}<span class="num">{n}</span></div>
+      <div class="art-body">
         <p class="where">{E(h['place'])}</p>
-        <h3>{E(h['name'])}</h3>
+        <h2>{E(h['name'])}</h2>
         <ul class="tags">{tags}</ul>
-        <p>{E(h['text'])}</p>
-        <ul class="highlights">{hl}</ul>
-        <dl class="facts-mini">
-          <dt>Ideal für</dt><dd>{E(h.get('ideal', ''))}</dd>
-          <dt>Anreise</dt><dd>{E(h.get('arrival', ''))}</dd>
-        </dl>
-        <a class="btn" href="{E(hotel_link(h))}" rel="sponsored nofollow noopener" target="_blank">Zum Hotel bei Booking.com</a>
+        <p>{E(note or h['text'])}</p>
+        <p class="ideal"><strong>Ideal für:</strong> {E(h.get('ideal', ''))}</p>
+        <div class="art-actions">
+          {booking_button(h, "Bei Booking.com ansehen")}
+          <a class="btn-2" href="../../reiseziele/{d['slug']}/{hid}/">Mehr zum Hotel</a>
+        </div>
       </div>
     </li>"""
+    dests = []
+    for hid, _ in a["hotels"]:
+        d = HOTELS[hid][0]
+        if d not in dests:
+            dests.append(d)
+    dest_links = " · ".join(f'<a href="../../reiseziele/{d["slug"]}/">{d["name"]}: beste Reisezeit und alle Hotels</a>'
+                            for d in dests)
+    outro = "".join(f"<p>{p}</p>" for p in a.get("outro", []))
+    body = f"""
+<section class="dest-hero art-hero{cls}" style="{style}">
+  <p class="crumb"><a href="../../">Start</a> <span aria-hidden="true">/</span> <a href="../">Ratgeber</a></p>
+  <h1>{E(a['title'])}</h1>
+  <p class="dest-sub">{E(a['short'])}</p>
+</section>
+
+<article class="article">
+  <div class="prose art-intro">
+    {intro}
+    <p class="note">Stand: {a.get('updated', SITE['updated'])}. Links zu Buchungsportalen können Affiliate-Links sein. Für dich ändert sich am Preis nichts.</p>
+  </div>
+  <ol class="art-list">{items}
+  </ol>
+  <div class="prose">
+    {outro}
+    <p>{dest_links}</p>
+  </div>
+</article>
+"""
+    og = f"{SITE['url']}/bilder/{photo(d0['slug'])}" if photo(d0["slug"]) else ""
+    write(f"ratgeber/{a['slug']}/index.html", page(
+        f"ratgeber/{a['slug']}/index.html", f"{a['title']} | {SITE['name']}", a["short"], body,
+        "ratgeber", og_image=og))
+
+
+def article_teasers(arts, prefix):
+    out = ""
+    for a in arts:
+        d, style, cls = article_style(a, prefix)
+        out += f"""
+    <li><a class="art-teaser" href="{prefix}ratgeber/{a['slug']}/">
+      <span class="tile{cls}" style="{style}" aria-hidden="true"></span>
+      <span><strong>{E(a['title'])}</strong><br><small>{len(a['hotels'])} Hotels · {E(a['short'])}</small></span>
+    </a></li>"""
+    return f'<ul class="art-teasers">{out}\n  </ul>'
+
+
+def build_article_index():
+    body = f"""
+<section class="plain">
+  <h1>Ratgeber</h1>
+  <p class="lead">Hotel-Listen zu bestimmten Urlaubsarten – zum Beispiel nur für Erwachsene, mit eigenem Pool oder besonders ruhig gelegen.</p>
+  {article_teasers(ARTICLES, "../")}
+</section>"""
+    write("ratgeber/index.html", page("ratgeber/index.html", f"Ratgeber: Hotel-Listen | {SITE['name']}",
+          "Hotel-Listen zu Urlaubsarten: Adults only, Pool-Villen, ruhige Lage und mehr.", body, "ratgeber"))
+
+
+# ---------------------------------------------------------------- Reisezeit pro Monat
+MONTH_SLUGS = ["januar", "februar", "maerz", "april", "mai", "juni", "juli",
+               "august", "september", "oktober", "november", "dezember"]
+
+
+def build_month(i):
+    m, slug = MONTHS[i], MONTH_SLUGS[i]
+    good = [d for d in DESTINATIONS if i + 1 in d["best"]]
+    rest = [d for d in DESTINATIONS if i + 1 not in d["best"]]
+    cards = ""
+    for d in good:
+        picks = "".join(f'<li><a href="../../reiseziele/{d["slug"]}/{h["id"]}/">{E(h["name"])}</a> <small>{E(h["place"])}</small></li>'
+                        for h in d["hotels"][:3])
+        cards += f"""
+    <li class="month-dest">
+      <a class="tile{tile_class(d)}" href="../../reiseziele/{d['slug']}/" style="{tile_style(d, '../../')}"><span>{d['name']}</span></a>
+      <div>
+        <h2><a href="../../reiseziele/{d['slug']}/">{d['name']}</a></h2>
+        <p>{d['short']}</p>
+        <p class="note mono">Flug {d['flight']} · beste Reisezeit:</p>
+        {months_bar(d['best'])}
+        <h3>Hotel-Tipps</h3>
+        <ul class="month-picks">{picks}</ul>
+      </div>
+    </li>"""
+    prev_i, next_i = (i - 1) % 12, (i + 1) % 12
+    rest_txt = ", ".join(f'<a href="../../reiseziele/{d["slug"]}/">{d["name"]}</a>' for d in rest)
+    lead = (f"Im {m} sind {len(good)} unserer Reiseziele in ihrer besten Reisezeit."
+            if len(good) != 1 else f"Im {m} ist ein Reiseziel in seiner besten Reisezeit.")
+    body = f"""
+<section class="plain">
+  <p class="plain-crumb"><a href="../../">Start</a> / <a href="../">Reisekalender</a></p>
+  <h1>Wohin im {m}?</h1>
+  <p class="lead">{lead} Hier findest du sie mit Flugzeit und ausgewählten Hotels.</p>
+  <ul class="month-list">{cards}
+  </ul>
+  <p>Weniger ideal im {m}: {rest_txt or '–'}.</p>
+  <p class="note">Die Reisezeiten sind Richtwerte für Sonne und Badewetter. Das Wetter kann von Jahr zu Jahr abweichen.</p>
+  <nav class="month-nav" aria-label="Weitere Monate">
+    <a href="../{MONTH_SLUGS[prev_i]}/">← {MONTHS[prev_i]}</a>
+    <a href="../{MONTH_SLUGS[next_i]}/">{MONTHS[next_i]} →</a>
+  </nav>
+</section>"""
+    names = ", ".join(d["name"] for d in good)
+    write(f"reisekalender/{slug}/index.html", page(
+        f"reisekalender/{slug}/index.html", f"Wohin im {m}? Reiseziele mit Sonne | {SITE['name']}",
+        f"Wohin im {m}: {names} – beste Reisezeit, Flugzeit und ausgewählte Hotels.", body, "kalender"))
 
 
 # ---------------------------------------------------------------- Startseite
@@ -210,7 +492,7 @@ def build_home():
 
     # Hotel-Auswahl: je Reiseziel das erste Hotel
     picks = "".join(f"""
-      <li><a href="reiseziele/{d['slug']}/#hotel-{d['hotels'][0]['id']}">
+      <li><a href="reiseziele/{d['slug']}/{d['hotels'][0]['id']}/">
         <span class="swatch small" style="--sky:{d['sky']};--land:{d['land']}" aria-hidden="true"></span>
         <span><strong>{E(d['hotels'][0]['name'])}</strong><br><small>{E(d['hotels'][0]['place'])} · {d['name']}</small></span>
       </a></li>""" for d in DESTINATIONS)
@@ -242,6 +524,14 @@ def build_home():
   </ul>
 </section>
 
+<section class="picks" aria-labelledby="h-art">
+  <div class="section-head">
+    <h2 id="h-art">Aus dem Ratgeber</h2>
+    <a class="more" href="ratgeber/">Alle Hotel-Listen →</a>
+  </div>
+  {article_teasers(ARTICLES[:4], "")}
+</section>
+
 <section class="method">
   <h2>So wählen wir aus</h2>
   <div class="method-grid">
@@ -262,13 +552,21 @@ def build_destination(d):
     intro = "".join(f"<p>{p}</p>" for p in d["intro"])
     fits = "".join(f"<li>{E(f)}</li>" for f in d["fits"])
     tips = "".join(f"<li>{E(t)}</li>" for t in d["tips"])
-    hotels = "".join(hotel_card(d, h) for h in d["hotels"])
+    hotels = "".join(hotel_card(d, h, "") for h in d["hotels"])
+    # Alte Sprungmarken (#hotel-<id>) auf die Hotelseite umleiten.
+    ids = json.dumps([h["id"] for h in d["hotels"]])
+    jump = ("<script>(function(){var m=location.hash.match(/^#hotel-([a-z0-9-]+)$/);"
+            f"if(m&&{ids}.indexOf(m[1])>=0)location.replace(m[1]+'/');}})();</script>")
     others = "".join(
         f'<a class="tile{tile_class(o)}" href="../{o["slug"]}/" style="{tile_style(o, "../../")}"><span>{o["name"]}</span></a>'
         for o in DESTINATIONS if o["slug"] != d["slug"])
     credit = (f'<p class="photo-credit">Foto: {E(d["photo_credit"])}</p>'
               if photo(d["slug"]) and d.get("photo_credit") else "")
     og = f"{SITE['url']}/bilder/{photo(d['slug'])}" if photo(d["slug"]) else ""
+    ids_here = {h["id"] for h in d["hotels"]}
+    arts = [a for a in ARTICLES if any(i in ids_here for i, _ in a["hotels"])]
+    art_block = (f'\n<section class="picks" aria-labelledby="h-art">\n  <h2 id="h-art">Ratgeber zu {d["name"]}</h2>\n  '
+                 f'{article_teasers(arts, "../../")}\n</section>\n') if arts else ""
     body = f"""
 <section class="dest-hero{tile_class(d)}" style="{tile_style(d, '../../')}">
   <p class="crumb"><a href="../../">Start</a> <span aria-hidden="true">/</span> Reiseziele</p>
@@ -288,7 +586,7 @@ def build_destination(d):
     <h3>Beste Reisezeit</h3>
     {months_bar(d['best'])}
     <h3>Flugzeit ab Deutschland</h3>
-    <p>{d['flight']}</p>
+    <p class="mono">{d['flight']}</p>
     <h3>Passt gut für</h3>
     <ul class="fits">{fits}</ul>
   </aside>
@@ -301,9 +599,9 @@ def build_destination(d):
   </div>
   <ul class="hotel-list">{hotels}
   </ul>
-  <p class="note">Die Buttons führen zu einem Buchungsportal, wo du aktuelle Preise und Verfügbarkeit siehst. Links zu Buchungsportalen können Affiliate-Links sein.</p>
+  {jump}
 </section>
-
+{art_block}
 <section class="others" aria-labelledby="h-others">
   <h2 id="h-others">Weitere Reiseziele</h2>
   <div class="horizon small">{others}</div>
@@ -318,7 +616,8 @@ def build_destination(d):
 
 # ---------------------------------------------------------------- Reisekalender
 def build_calendar():
-    head = "".join(f'<th scope="col"><abbr title="{m}">{m[:3]}</abbr></th>' for m in MONTHS)
+    head = "".join(f'<th scope="col"><a href="{MONTH_SLUGS[i]}/"><abbr title="Wohin im {m}?">{m[:3]}</abbr></a></th>'
+                   for i, m in enumerate(MONTHS))
     rows = ""
     for d in DESTINATIONS:
         cells = "".join(
@@ -331,7 +630,7 @@ def build_calendar():
     for i, m in enumerate(MONTHS):
         ziele = [d for d in DESTINATIONS if i + 1 in d["best"]]
         links = ", ".join(f'<a href="../reiseziele/{d["slug"]}/">{d["name"]}</a>' for d in ziele) or "–"
-        by_month += f"<li><strong>{m}:</strong> {links}</li>"
+        by_month += f'<li><strong><a href="{MONTH_SLUGS[i]}/">{m}</a>:</strong> {links}</li>'
 
     body = f"""
 <section class="plain">
@@ -419,14 +718,12 @@ def build_static():
 
 # ---------------------------------------------------------------- Technik
 def build_tech():
-    write("favicon.svg",
-          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#9CC5D9"/>'
-          '<circle cx="16" cy="18" r="7" fill="#F2B84B"/>'
-          '<path d="M0 18h32v7a7 7 0 0 1-7 7H7a7 7 0 0 1-7-7z" fill="#1F6F86"/></svg>')
+    # favicon.svg, apple-touch-icon.png und logo/ erzeugt _src/make_logo.py
     write("CNAME", SITE["domain"] + "\n")
     write("robots.txt", f"User-agent: *\nAllow: /\n\nSitemap: {SITE['url']}/sitemap.xml\n")
     urls = ["", "reisekalender/", "ueber-uns/", "impressum/", "datenschutz/"] + \
-           [f"reiseziele/{d['slug']}/" for d in DESTINATIONS]
+           [f"reiseziele/{d['slug']}/" for d in DESTINATIONS] + \
+           [f"reiseziele/{d['slug']}/{h['id']}/" for d in DESTINATIONS for h in d["hotels"] if h.get("index")] +            ["ratgeber/"] + [f"ratgeber/{a['slug']}/" for a in ARTICLES] +            [f"reisekalender/{m}/" for m in MONTH_SLUGS]
     sm = "".join(f"  <url><loc>{SITE['url']}/{u}</loc></url>\n" for u in urls)
     write("sitemap.xml", f'<?xml version="1.0" encoding="UTF-8"?>\n'
           f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{sm}</urlset>\n')
@@ -434,10 +731,22 @@ def build_tech():
 
 if __name__ == "__main__":
     process_photos()
+    check_articles()
+    removed = update_registry()
     build_home()
     for d in DESTINATIONS:
         build_destination(d)
+        for h in d["hotels"]:
+            build_hotel(d, h)
+    for entry in removed:
+        build_removed(entry)
+        print(f"Hinweis: {entry} ist nicht mehr in content.py – Adresse leitet aufs Reiseziel weiter.")
     build_calendar()
+    for i in range(12):
+        build_month(i)
+    for a in ARTICLES:
+        build_article(a)
+    build_article_index()
     build_static()
     build_tech()
     print("Fertig:", OUT)

@@ -1,19 +1,23 @@
 # Inhalte von urlaubshorizont.de
-# Hier pflegst du (oder der Agent) Reiseziele und Hotels.
+# Hier pflegst du (oder der Agent) Reiseziele, Hotels und Ratgeber-Artikel.
 # Nach jeder Änderung:  python3 _src/build.py
 #
 # Hotel-Felder:
-#   id       bleibt dauerhaft gleich -> Sprungmarke /reiseziele/<ziel>/#hotel-<id> für Pins
+#   id       bleibt dauerhaft gleich -> eigene Seite /reiseziele/<ziel>/<id>/ (Ziel der Hotel-Pins)
+#            Wird ein Hotel gelöscht, leitet seine Adresse automatisch aufs Reiseziel weiter
+#            (Register: _src/hotel_ids.txt).
 #   booking  Ländercode + Slug der Booking.com-Hotelseite, z. B. ("es", "cap-rocat")
 #            -> https://www.booking.com/hotel/es/cap-rocat.de.html (noch KEIN Affiliate-Link)
 #   link     optional: überschreibt den Booking-Link, z. B. mit dem CJ-Deeplink nach der Freigabe
 #   image    optional: Bild-URL aus dem Affiliate-Feed (nach der Freigabe). Leer = Farbfläche.
 #   arrival  Anreise/Transfer, ideal = für wen, highlights = 3 kurze Stichpunkte
+#   fits_if  optional: Liste „Passt zu dir, wenn …“ (eigene, belegbare Einschätzung)
+#   not_if   optional: Liste „Eher nicht, wenn …“
+#   index    optional: True = Hotelseite für Google freigeben. Standard: ausgeblendet (noindex),
+#            erst freigeben, wenn die Seite echten Mehrwert hat (z. B. fits_if/not_if ausgefüllt).
 #
 # Reiseziel-Fotos: Original nach _src/fotos/<slug>.jpg legen (z. B. kanaren.jpg) und neu bauen.
 #   Optional pro Reiseziel "photo_credit": "Name / Bildagentur" für die Bildquelle im Titelbild.
-# Hotel-Feld "id": bleibt dauerhaft gleich. Daraus entsteht die Sprungmarke
-#   (z. B. /reiseziele/kanaren/#hotel-botanico) für Pins.
 
 SITE = {
     "name": "Urlaubshorizont",
@@ -36,7 +40,7 @@ def booking_url(country, slug):
 
 DESTINATIONS = [
     {
-        "slug": "kanaren", "name": "Kanaren", "sky": "#9CC5D9", "land": "#2E2C33",
+        "slug": "kanaren", "name": "Kanaren", "sky": "#DCE9EE", "land": "#0F2D3F",
         "best": [1, 2, 3, 4, 10, 11, 12],
         "short": "Mildes Klima das ganze Jahr, vulkanische Landschaften und Sonne auch im Winter.",
         "flight": "ca. 4 bis 5 Stunden",
@@ -90,7 +94,7 @@ DESTINATIONS = [
         ],
     },
     {
-        "slug": "mallorca", "name": "Mallorca", "sky": "#F2D9A6", "land": "#3E86A8",
+        "slug": "mallorca", "name": "Mallorca", "sky": "#EFE8CF", "land": "#2C6966",
         "best": [5, 6, 7, 8, 9, 10],
         "short": "Buchten, Bergdörfer und Palma – von Mai bis Oktober in Bestform.",
         "flight": "ca. 2 bis 2,5 Stunden",
@@ -144,7 +148,7 @@ DESTINATIONS = [
         ],
     },
     {
-        "slug": "karibik", "name": "Karibik", "sky": "#BFE7E1", "land": "#1E8C8A",
+        "slug": "karibik", "name": "Karibik", "sky": "#D6ECEA", "land": "#1F6F78",
         "best": [12, 1, 2, 3, 4],
         "short": "Weiße Strände und türkisfarbenes Wasser, am schönsten von Dezember bis April.",
         "flight": "ca. 9 bis 11 Stunden",
@@ -198,7 +202,7 @@ DESTINATIONS = [
         ],
     },
     {
-        "slug": "malediven", "name": "Malediven", "sky": "#C4ECF0", "land": "#2AA3B8",
+        "slug": "malediven", "name": "Malediven", "sky": "#DDEFF4", "land": "#3B87A0",
         "best": [12, 1, 2, 3, 4],
         "short": "Eine Insel, ein Resort: Lagunen, Riffe und Wasserbungalows.",
         "flight": "ca. 10 Stunden, meist mit Umstieg",
@@ -252,7 +256,7 @@ DESTINATIONS = [
         ],
     },
     {
-        "slug": "aegypten", "name": "Ägypten", "sky": "#E9C28B", "land": "#1F5F8B",
+        "slug": "aegypten", "name": "Ägypten", "sky": "#EFE2C4", "land": "#24506A",
         "best": [3, 4, 5, 10, 11],
         "short": "Korallenriffe am Roten Meer, Wüste und Sonne – ideal im Frühjahr und Herbst.",
         "flight": "ca. 4,5 bis 5 Stunden",
@@ -306,7 +310,7 @@ DESTINATIONS = [
         ],
     },
     {
-        "slug": "thailand", "name": "Thailand", "sky": "#A9CFA0", "land": "#2F6F5B",
+        "slug": "thailand", "name": "Thailand", "sky": "#DCE8DA", "land": "#2F5E4E",
         "best": [11, 12, 1, 2, 3, 4],
         "short": "Inseln, Kalkfelsen und Garküchen – die Andamanensee glänzt von November bis April.",
         "flight": "ca. 11 bis 12 Stunden",
@@ -357,6 +361,76 @@ DESTINATIONS = [
              "highlights": ["Infinity-Pool mit Meerblick", "Villen am Hang", "Sonnenuntergänge über dem Meer"],
              "ideal": "Paare und Hochzeitsreisende", "arrival": "Flughafen Phuket ca. 30 Min.",
              "booking": ("th", "paresa")},
+        ],
+    },
+]
+
+
+# ---------------------------------------------------------------- Ratgeber-Artikel
+# Seiten unter /ratgeber/<slug>/ (Ziel der Listen-Pins). Hotels werden per ID aus
+# DESTINATIONS gezogen und bekommen zwei Buttons: direkt zu Booking und „Mehr zum Hotel“.
+#   slug     bleibt dauerhaft gleich (Teil der Pin-Links)
+#   dest     Reiseziel für Farben/Foto im Kopfbereich
+#   hotels   Liste von (hotel-id, "eigener Text für diesen Artikel"). Leerer Text = Hoteltext.
+#   intro / outro  Absätze. Nur belegbare Fakten, keine Preise.
+ARTICLES = [
+    {
+        "slug": "adults-only-hotels-winter", "dest": "kanaren", "updated": "Oktober 2026",
+        "title": "Adults only im Winter: 5 Hotels nur für Erwachsene",
+        "short": "Fünf Hotels nur für Erwachsene auf den Kanaren und in der Karibik – zwei Ziele, an denen es von Dezember bis März warm ist.",
+        "intro": [
+            "Wenn es in Deutschland grau wird, zieht es viele in die Sonne. Wer ohne Kinder reist, sucht dafür oft ein Hotel, in dem es ruhiger zugeht: Hotels mit dem Zusatz „Adults only“ nehmen nur Erwachsene auf. Das Mindestalter legt jedes Haus selbst fest, meist liegt es bei 16 oder 18 Jahren.",
+            "Zwei Ziele sind im Winter besonders zuverlässig: die Kanaren mit ca. 4 bis 5 Stunden Flugzeit und die Karibik mit ca. 9 bis 11 Stunden – eher etwas für einen längeren Urlaub.",
+        ],
+        "hotels": [
+            ("joia-salome", ""),
+            ("secrets-bahia-real", ""),
+            ("joia-bavaro", ""),
+            ("excellence-punta-cana", ""),
+            ("joia-rose-hall", ""),
+        ],
+    },
+    {
+        "slug": "adults-only-all-inclusive-karibik", "dest": "karibik", "updated": "Oktober 2026",
+        "title": "Nur für Erwachsene: 4 All-inclusive-Resorts in der Karibik",
+        "short": "Vier All-inclusive-Resorts ohne Kinder in der Dominikanischen Republik und auf Jamaika.",
+        "intro": [
+            "Alle vier Resorts sind All-inclusive und nehmen nur Erwachsene auf – das Sandals Montego Bay sogar ausschließlich Paare. Zwei liegen in der Dominikanischen Republik rund um Punta Cana, zwei an der Nordküste Jamaikas bei Montego Bay.",
+            "Die beste Reisezeit für die Karibik ist Dezember bis April.",
+        ],
+        "hotels": [
+            ("joia-bavaro", ""),
+            ("excellence-punta-cana", ""),
+            ("joia-rose-hall", ""),
+            ("sandals-montego-bay", ""),
+        ],
+    },
+    {
+        "slug": "pool-villen-phuket", "dest": "thailand", "updated": "Oktober 2026",
+        "title": "Pool-Villen und Infinity-Pools: 3 Resorts auf Phuket",
+        "short": "Drei Resorts an der ruhigeren Nord- und Westküste Phukets, mit eigenem Pool oder Infinity-Pool über dem Meer.",
+        "intro": [
+            "Auf Phuket gibt es neben großen Strandhotels auch Resorts, in denen du in einer Villa mit eigenem Pool wohnst. Drei Beispiele von der ruhigeren Nord- und Westküste der Insel.",
+            "Die beste Reisezeit an der Andamanensee ist November bis April.",
+        ],
+        "hotels": [
+            ("trisara", ""),
+            ("anantara-mai-khao", ""),
+            ("paresa", ""),
+        ],
+    },
+    {
+        "slug": "ruhige-hotels-mallorca", "dest": "mallorca", "updated": "Oktober 2026",
+        "title": "Ruhig wohnen auf Mallorca: 3 Hotels abseits der großen Badeorte",
+        "short": "Ein Bergdorf, ein Tal an der Ostküste und eine alte Festung: drei Hotels für ruhige Tage auf Mallorca.",
+        "intro": [
+            "Mallorca hat mehr zu bieten als volle Strände. Diese drei Hotels liegen im Künstlerdorf Deià in der Tramuntana, im Tal von Canyamel an der Ostküste und in einer ehemaligen Festung an der Bucht von Palma.",
+            "Am schönsten ist Mallorca von Mai bis Oktober.",
+        ],
+        "hotels": [
+            ("la-residencia", ""),
+            ("cap-vermell", ""),
+            ("cap-rocat", ""),
         ],
     },
 ]
