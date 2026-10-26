@@ -1,0 +1,2 @@
+# GitHub Pages: nur die Website veröffentlichen
+exclude: [CLAUDE.md, README.md, _src, _agent]

@@ -1,0 +1,4 @@
+Hier deine Original-Fotos ablegen, ein Foto pro Reiseziel:
+kanaren.jpg, mallorca.jpg, karibik.jpg, malediven.jpg, aegypten.jpg, thailand.jpg
+Dann im Projektordner:  python3 _src/build.py
+Dieser Ordner wird NICHT veröffentlicht.
