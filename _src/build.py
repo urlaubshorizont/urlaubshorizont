@@ -661,7 +661,7 @@ def build_static():
 <section class="plain prose">
   <h1>Über uns</h1>
   <p class="lead">{SITE['name']} hilft dir, das passende Reiseziel und ein gutes Hotel zu finden – ohne stundenlanges Vergleichen.</p>
-  <p>Hinter {SITE['name']} steckt Steffen, Reisefan aus Norddeutschland. Die Idee: Reiseziele kurz und ehrlich vorstellen, die beste Reisezeit auf einen Blick zeigen und Hotels sammeln, bei denen Lage und Ausstattung zur Urlaubsart passen.</p>
+  <p>{SITE['name']} ist ein unabhängiges Reiseprojekt aus Norddeutschland. Die Idee: Reiseziele kurz und ehrlich vorstellen, die beste Reisezeit auf einen Blick zeigen und Hotels sammeln, bei denen Lage und Ausstattung zur Urlaubsart passen.</p>
   <h2>Wie wir auswählen</h2>
   <p>Wir stellen ausschließlich real existierende Hotels vor und beschreiben nur Merkmale, die sich belegen lassen. Preise nennen wir nicht, weil sie sich ständig ändern. Aktuelle Preise und Verfügbarkeit siehst du direkt beim Buchungsportal.</p>
   <h2>Wie sich die Seite finanziert</h2>
@@ -692,7 +692,7 @@ def build_static():
 <section class="plain prose legal">
   <h1>Datenschutzerklärung</h1>
   <h2>Verantwortlicher</h2>
-  <p>Steffen Witte, Wilhelmstraße 25b, 25336 Elmshorn, E-Mail: <a href="mailto:info@urlaubshorizont.de">info@urlaubshorizont.de</a></p>
+  <p>Verantwortlich ist der Betreiber dieser Website. Name und Anschrift findest du im <a href="../impressum/">Impressum</a>. E-Mail: <a href="mailto:info@urlaubshorizont.de">info@urlaubshorizont.de</a></p>
   <h2>Hosting</h2>
   <p>Diese Website wird bei GitHub Pages gehostet, einem Dienst der GitHub, Inc., USA. Beim Aufruf der Seiten verarbeitet GitHub technisch notwendige Daten, insbesondere die IP-Adresse, Datum und Uhrzeit des Zugriffs sowie Browserinformationen, um die Website auszuliefern und ihre Sicherheit zu gewährleisten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO; unser berechtigtes Interesse liegt in einer sicheren und zuverlässigen Bereitstellung der Website. Dabei kann eine Übermittlung in die USA stattfinden. GitHub ist unter dem EU-US Data Privacy Framework zertifiziert; die Übermittlung stützt sich auf den Angemessenheitsbeschluss der EU-Kommission (Art. 45 DSGVO).</p>
   <h2>Keine Cookies, kein Tracking</h2>
